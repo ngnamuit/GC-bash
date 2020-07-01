@@ -1,0 +1,89 @@
+version: 2
+
+jobs:
+  build:
+    docker:
+      - image: gigacover/circleci-atlas:xenial  # gigacover version of ubuntu 16.04 xenial ref. https://circleci.com/docs/2.0/circleci-images/#buildpack-deps  # note: use this image to have circleci env be exact with gigacover env ie Ubuntu 16.04 xenial
+      # - image: python:3.6.9-buster  # debian 10 buster python with pipenv pre-installed ref. https://github.com/CircleCI-Public/circleci-dockerfiles/tree/master/python/images  # note: this image was used before but it is Debian not Ubuntu
+        environment:
+          IN_CI: 1
+          XDIST_WORKER_NUM: 8  # number of worker to run with xdist
+
+      - image: mongo:3.4.20
+
+      - image: mdillon/postgis:9.5
+        environment:
+          POSTGRES_USER: ubuntu
+          POSTGRES_PASSWORD: ""
+          POSTGRES_DB: atlas_test
+        # change max_connections to run parallel into postgis image ref.https://stackoverflow.com/a/52879503
+        command: |
+          postgres -c max_connections=900
+
+      - image: rabbitmq:3.7.15
+        environment:
+          RABBITMQ_DEFAULT_USER: guest
+          RABBITMQ_DEFAULT_PASS: guest
+          RABBITMQ_DEFAULT_VHOST: "/"
+
+    working_directory: ~/atlas
+
+    branches:
+      only:
+        - master
+        # - develop
+        - release
+        - circleci
+
+    steps:
+      - run:
+          name: prerequisite ready check
+          command: |
+            echo "user home $HOME"
+            cat /etc/*-release | grep PRETTY_NAME  # test linux distro
+            python --version
+            pipenv --version
+            wkhtmltopdf --version
+            libreoffice --version
+
+      # checkout :atlas code
+      - checkout
+
+      #region install requirements.txt aka Pipfile using pipenv ref. https://github.com/circleci/circleci-images/issues/168#issuecomment-372046916
+      - restore_cache:
+          key: cache-{{ checksum "Pipfile.lock" }}-xenial-191127c
+
+      - run:
+          name: install atlas Pipfile
+          command: pipenv sync  # pipenv sync instead of pipenv install ref. https://stackoverflow.com/a/53489664/248616
+
+      - save_cache:
+          key: cache-{{ checksum "Pipfile.lock" }}-xenial-191127c
+          paths:  # the paths to save to cache entry
+            - /home/circleci/.local
+            - /home/circleci/.cache
+            - /home/circleci/atlas/.venv/
+      #endregion
+
+
+      - run:
+          name: prepare databases
+          command: pipenv run python .circleci/create_xdist_db.py
+
+      - run:
+          name: atlas configuration
+          command: |
+            cp config.sample.json config.test.json
+
+      - run:
+           name: print cpu info
+           command: |
+             echo; echo "lscpu: `lscpu` "
+             echo; echo "nproc: `nproc` "
+             echo; echo "fravadona: `lscpu --online --parse=Core,Socket | grep --invert-match '^#' | sort --unique | wc --lines`  ref. https://stackoverflow.com/a/47435156/248616"
+
+      - run:
+          name: run test
+          #command: pipenv run pytest -x -p no:warnings --tb=short -n${XDIST_WORKER_NUM} --dist=loadfile --reruns 2
+          command: |
+            bin/run-test-parallel.sh -do_pipenv_sync $XDIST_WORKER_NUM
