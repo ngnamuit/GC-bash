@@ -1,5 +1,7 @@
-version: 2
-
+version: 2.1
+orbs:
+  # customize notify slack
+  slack: circleci/slack@3.4.2
 jobs:
   build:
     docker:
@@ -27,14 +29,6 @@ jobs:
           RABBITMQ_DEFAULT_VHOST: "/"
 
     working_directory: ~/atlas
-
-    branches:
-      only:
-        - master
-        # - develop
-        - release
-        - circleci
-
     steps:
       - run:
           name: prerequisite ready check
@@ -86,4 +80,11 @@ jobs:
           name: run test
           #command: pipenv run pytest -x -p no:warnings --tb=short -n${XDIST_WORKER_NUM} --dist=loadfile --reruns 2
           command: |
-            bin/run-test-parallel.sh -do_pipenv_sync $XDIST_WORKER_NUM
+            run-test-parallel.sh -do_pipenv_sync $XDIST_WORKER_NUM
+
+      - run: exit 0
+      # customize notify slack  ref. https://circleci.com/orbs/registry/orb/circleci/slack
+      - slack/status:
+          fail_only: true
+          only_for_branches: "release,master,circleci"
+          webhook: "webhook"
