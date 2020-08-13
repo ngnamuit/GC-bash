@@ -9,3 +9,7 @@ journalctl -f -u atlas-api.service -n100
 
 
 ##=========== CIRCLECI ENDREGION =================##
+
+
+# FIND TOTAL and find number %
+perl -pe 's/.*?TOTAL.*?(\d+%)/$1/s/%//' tmp.txt
